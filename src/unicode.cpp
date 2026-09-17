@@ -330,7 +330,7 @@ static std::vector<size_t> unicode_regex_split_custom_gpt2(const std::string & t
 }
 
 // LLAMA3 system regex: "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
-static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string & text, const std::vector<size_t> & offsets) {
+static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string & text, const std::vector<size_t> & offsets, bool k2_horizon = false) {
     std::vector<size_t> bpe_offsets; // store the offset of each word
     bpe_offsets.reserve(offsets.size()); // Reserve memory for the approximate size
 
@@ -350,6 +350,12 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
 
         auto _get_flags = [&] (const size_t pos) -> unicode_cpt_flags {
             return (offset_ini <= pos && pos < offset_end) ? unicode_cpt_flags_from_cpt(cpts[pos]) : unicode_cpt_flags{};
+        };
+
+        auto _is_word = [&] (const size_t pos) -> bool {
+            const auto flags = _get_flags(pos);
+            const uint32_t cpt = _get_cpt(pos);
+            return flags.is_letter || (k2_horizon && (flags.is_accent_mark || cpt == 0x200C || cpt == 0x200D));
         };
 
         size_t _prev_end = offset_ini;
@@ -376,6 +382,9 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
             // regex: (?i:'s|'t|'re|'ve|'m|'ll|'d) // case insensitive
             if (cpt == '\'' && pos+1 < offset_end) {
                 uint32_t cpt_next = unicode_tolower(_get_cpt(pos+1));
+                if (k2_horizon && cpt_next == 0x017F) {
+                    cpt_next = 's'; // Unicode case-folding of long s
+                }
                 if (cpt_next == 's' || cpt_next == 't' || cpt_next == 'm' || cpt_next == 'd') {
                     pos += _add_token(pos+2);
                     continue;
@@ -393,9 +402,9 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
 
             // regex: [^\r\n\p{L}\p{N}]?\p{L}+
             if (!(cpt == '\r' || cpt == '\n' || flags.is_number)) {
-                if (flags.is_letter || _get_flags(pos+1).is_letter) {  // one or more letters
+                if (_is_word(pos) || _is_word(pos+1)) {
                     pos++;
-                    while (_get_flags(pos).is_letter) {
+                    while (_is_word(pos)) {
                         pos++;
                     }
                     _add_token(pos);
@@ -1057,6 +1066,9 @@ static std::vector<size_t> unicode_regex_split_custom(const std::string & text, 
             regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+") {
         bpe_offsets = unicode_regex_split_custom_llama3(text, offsets);
     } else if (
+            regex_expr == "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?(?:\\p{L}|\\p{M}|\\u200C|\\u200D)+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+") {
+        bpe_offsets = unicode_regex_split_custom_llama3(text, offsets, true);
+    } else if (
            regex_expr == "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+") {
         bpe_offsets = unicode_regex_split_custom_qwen2(text, offsets);
     } else if (
@@ -1214,6 +1226,10 @@ bool unicode_cpt_is_han(uint32_t cpt) {
 }
 
 std::vector<std::string> unicode_regex_split(const std::string & text, const std::vector<std::string> & regex_exprs, bool byte_encode) {
+    if (text.empty()) {
+        return {};
+    }
+
     // unicode categories
     static const std::map<std::string, int> k_ucat_enum = {
         { "\\p{N}", unicode_cpt_flags::NUMBER },
