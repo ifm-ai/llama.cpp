@@ -20,6 +20,14 @@ from .base import ModelBase, TextModel, gguf
 class K2HorizonModel(TextModel):
     model_arch = gguf.MODEL_ARCH.K2HORIZON
 
+    def get_vocab_tokenizer(self):
+        from transformers import PreTrainedTokenizerFast
+
+        return PreTrainedTokenizerFast.from_pretrained(
+            self.dir_model,
+            local_files_only=True,
+        )
+
     def set_vocab(self):
         super().set_vocab()
 

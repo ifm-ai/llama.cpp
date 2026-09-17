@@ -1417,13 +1417,16 @@ class TextModel(ModelBase):
 
         return seems_special
 
+    def get_vocab_tokenizer(self):
+        from transformers import AutoTokenizer
+        return AutoTokenizer.from_pretrained(self.dir_model)
+
     # used for GPT-2 BPE and WordPiece vocabs
     def get_vocab_base(self) -> tuple[list[str], list[int], str]:
         tokens: list[str] = []
         toktypes: list[int] = []
 
-        from transformers import AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(self.dir_model)
+        tokenizer = self.get_vocab_tokenizer()
         vocab_size = self.hparams.get("vocab_size", len(tokenizer.vocab))  # ty: ignore[unresolved-attribute]
         assert max(tokenizer.vocab.values()) < vocab_size  # ty: ignore[unresolved-attribute]
 
